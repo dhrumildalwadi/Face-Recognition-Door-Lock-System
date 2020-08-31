@@ -1,59 +1,78 @@
+# Import OpenCV2 for image processing
 import cv2
-from picamera.array import PiRGBArray
-from picamera import PiCamera
-import numpy as np 
+import pandas as pd
 import pickle
-import RPi.GPIO as GPIO
-from time import sleep
+import os
 
-relay_pin = [26]
-GPIO.setmode(GPIO.BOARD)
-GPIO.setup(relay_pin, GPIO.OUT)
-GPIO.output(relay_pin, 0)
 
+def assure_path_exists(path):
+    dir = os.path.dirname(path)
+    if not os.path.exists(dir):
+        os.makedirs(dir)
+
+# Create Local Binary Patterns Histograms for face recognization
+recognizer = cv2.face.LBPHFaceRecognizer_create()
+
+assure_path_exists("trainer/")
+
+# Load the trained mode
+recognizer.read('trainer.yaml')
 with open('labels', 'rb') as f:
-	dicti = pickle.load(f)
-	f.close()
+    dicti = pickle.load(f)
+Id=0 
+# Load prebuilt model for Frontal Face
+cascadePath = "haarcascade_frontalface_default.xml"
 
-camera = PiCamera()
-camera.resolution = (640, 480)
-camera.framerate = 30
-rawCapture = PiRGBArray(camera, size=(640, 480))
+# Create classifier from prebuilt model
+faceCascade = cv2.CascadeClassifier(cascadePath);
 
-
-faceCascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
-recognizer = cv2.face.createLBPHFaceRecognizer()
-recognizer.read("trainer.yml")
-
+# Set the font style
 font = cv2.FONT_HERSHEY_SIMPLEX
 
-for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
-	frame = frame.array
-	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-	faces = faceCascade.detectMultiScale(gray, scaleFactor = 1.5, minNeighbors = 5)
-	for (x, y, w, h) in faces:
-		roiGray = gray[y:y+h, x:x+w]
+# Initialize and start the video frame capture
+cam = cv2.VideoCapture(0)
 
-		id_, conf = recognizer.predict(roiGray)
+# Loopqq
+while True:
+    # Read the video frame
+    ret, im =cam.read()
 
-		for name, value in dicti.items():
-			if value == id_:
-				print(name)
+    # Convert the captured frame into grayscale
+    gray = cv2.cvtColor(im,cv2.COLOR_BGR2GRAY)
 
-		if conf <= 70:
-			GPIO.output(relay_pin, 1)
-			cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-			cv2.putText(frame, name + str(conf), (x, y), font, 2, (0, 0 ,255), 2,cv2.LINE_AA)
+    # Get all face from the video frame
+    faces = faceCascade.detectMultiScale(gray, 1.2,5)
 
-		else:
-			GPIO.output(relay_pin, 0)
+    # For each face in faces
+    for(x,y,w,h) in faces:
 
-	cv2.imshow('frame', frame)
-	key = cv2.waitKey(1)
+        # Create rectangle around the face
+        cv2.rectangle(im, (x-20,y-20), (x+w+20,y+h+20), (0,255,0), 4)
 
-	rawCapture.truncate(0)
+        # Recognize the face belongs to which ID
+        Id, confidence = recognizer.predict(gray[y:y+h,x:x+w])
 
-	if key == 27:
-		break
+        # Check the ID if exist 
+        for name, value in dicti.items():
+            if value[0] == Id:
+                Id = name
+                print(name)
 
+
+
+        # Put text describe who is in the picture
+        cv2.rectangle(im, (x-22,y-90), (x+w+22, y-22), (0,255,0), -1)
+        cv2.putText(im, str(Id) + str(round(confidence,2))+"%", (x,y-40), font, 1, (255,255,255), 3)
+
+    # Display the video frame with the bounded rectangle
+    cv2.imshow('im',im) 
+
+    # If 'q' is pressed, close program
+    if cv2.waitKey(10) & 0xFF == ord('q'):
+        break
+
+# Stop the camera
+cam.release()
+
+# Close all windows
 cv2.destroyAllWindows()
